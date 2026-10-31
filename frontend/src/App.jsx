@@ -1,33 +1,53 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import Login from './pages/Login';
 import API from './services/api';
-import { LogOut, User as UserIcon, Shield, Users, LayoutDashboard, UserCheck, X } from 'lucide-react';
+import Sidebar from './components/Sidebar';
+import Topbar from './components/Topbar';
+import LeavePage from './pages/Leave';
+import ManagerDashboard from './pages/ManagerDashboard';
+import { Search, X, Plus, ChevronDown, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [employees, setEmployees] = useState([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
 
-  // Selected Employee Modal State
+  // Selected Employee Modal State & Manager Edit Mode
   const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [isEditingEmployee, setIsEditingEmployee] = useState(false);
+  const [editEmployeeForm, setEditEmployeeForm] = useState({});
+
+  // Attendance State
+  const [attendance, setAttendance] = useState({
+    status: 'Not Checked In',
+    checkInTime: null,
+    checkOutTime: null,
+    workingHours: 0
+  });
+  const [attendanceMessage, setAttendanceMessage] = useState('');
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+
+  // Manager Manage Attendance State
+  const [manageAttendanceDate, setManageAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [searchEmpId, setSearchEmpId] = useState('');
+
+  // Manager Leave Approvals
+  const [allLeaves, setAllLeaves] = useState([]);
+  const [loadingAllLeaves, setLoadingAllLeaves] = useState(false);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [rejectingLeaveId, setRejectingLeaveId] = useState(null);
 
   // My Profile Form State
   const [formData, setFormData] = useState({
-    phone: '',
-    dob: '',
-    gender: '',
-    address: '',
-    qualification: '',
-    institution: '',
-    specialization: '',
-    graduationYear: '',
-    bankName: '',
-    accountNumber: '',
-    ifsc: '',
-    emergencyName: '',
-    emergencyRelationship: '',
-    emergencyPhone: '',
+    phone: '', dob: '', gender: '', address: '',
+    qualification: '', institution: '', specialization: '', graduationYear: '',
+    bankName: '', accountNumber: '', ifsc: '',
+    emergencyName: '', emergencyRelationship: '', emergencyPhone: '',
+    employeeId: '', department: '', designation: '', joiningDate: '',
   });
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState('');
@@ -36,52 +56,138 @@ export default function App() {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
-      if (!parsedUser._id && parsedUser.id) parsedUser._id = parsedUser.id;
+      let rawId = parsedUser._id || parsedUser.id || '';
+      if (rawId.includes(':')) rawId = rawId.split(':')[0];
+      parsedUser._id = rawId;
+
       setUser(parsedUser);
       setFormData({
-        phone: parsedUser.phone || '',
-        dob: parsedUser.dob || '',
-        gender: parsedUser.gender || '',
-        address: parsedUser.address || '',
-        qualification: parsedUser.qualification || '',
-        institution: parsedUser.institution || '',
-        specialization: parsedUser.specialization || '',
-        graduationYear: parsedUser.graduationYear || '',
-        bankName: parsedUser.bankName || '',
-        accountNumber: parsedUser.accountNumber || '',
-        ifsc: parsedUser.ifsc || '',
-        emergencyName: parsedUser.emergencyName || '',
-        emergencyRelationship: parsedUser.emergencyRelationship || '',
-        emergencyPhone: parsedUser.emergencyPhone || '',
+        phone: parsedUser.phone || '', dob: parsedUser.dob || '', gender: parsedUser.gender || '', address: parsedUser.address || '',
+        qualification: parsedUser.qualification || '', institution: parsedUser.institution || '', specialization: parsedUser.specialization || '', graduationYear: parsedUser.graduationYear || '',
+        bankName: parsedUser.bankName || '', accountNumber: parsedUser.accountNumber || '', ifsc: parsedUser.ifsc || '',
+        emergencyName: parsedUser.emergencyName || '', emergencyRelationship: parsedUser.emergencyRelationship || '', emergencyPhone: parsedUser.emergencyPhone || '',
+        employeeId: parsedUser.employeeId || '', department: parsedUser.department || '', designation: parsedUser.designation || '', joiningDate: parsedUser.joiningDate || '',
       });
+      refreshUserProfile(rawId);
     }
   }, []);
 
+  const refreshUserProfile = async (userId) => {
+    try {
+      const res = await API.get(`/users/${userId}`);
+      if (res.data) {
+        setUser(res.data);
+        localStorage.setItem('user', JSON.stringify(res.data));
+      }
+    } catch (err) {
+      console.error('Failed to refresh user profile', err);
+    }
+  };
+
   useEffect(() => {
-    if (activeTab === 'employees') {
+    if (!user) return;
+
+    if (location.pathname === '/dashboard' || location.pathname === '/') {
+      fetchTodayAttendance();
+      if (user.role === 'manager') fetchAllLeaves();
+    } else if (location.pathname === '/attendance') {
+      if (user.role === 'manager') fetchEmployees();
+      else fetchAttendanceHistory();
+    } else if (location.pathname === '/manager-leaves' && user.role === 'manager') {
+      fetchAllLeaves();
+    } else if (location.pathname === '/employees' && user.role === 'manager') {
       fetchEmployees();
     }
-  }, [activeTab]);
+  }, [location.pathname, user]);
+
+  const fetchTodayAttendance = async () => {
+    try {
+      const res = await API.get('/attendance/today');
+      setAttendance(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchAttendanceHistory = async () => {
+    try {
+      const res = await API.get('/attendance/history');
+      setAttendanceHistory(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleCheckIn = async () => {
+    try {
+      const res = await API.post('/attendance/check-in');
+      setAttendance(res.data.attendance);
+      setAttendanceMessage(res.data.message);
+      setTimeout(() => setAttendanceMessage(''), 4000);
+    } catch (err) {
+      setAttendanceMessage(err.response?.data?.message || 'Check-in failed');
+    }
+  };
+
+  const handleCheckOut = async () => {
+    try {
+      const res = await API.post('/attendance/check-out');
+      setAttendance(res.data.attendance);
+      setAttendanceMessage(res.data.message);
+      setTimeout(() => setAttendanceMessage(''), 4000);
+    } catch (err) {
+      setAttendanceMessage(err.response?.data?.message || 'Check-out failed');
+    }
+  };
+
+  const fetchAllLeaves = async () => {
+    setLoadingAllLeaves(true);
+    try {
+      const res = await API.get('/leaves/all');
+      setAllLeaves(res.data);
+    } catch (err) { console.error(err); }
+    finally { setLoadingAllLeaves(false); }
+  };
+
+  const handleLeaveAction = async (leaveId, status, rejectionReason = '') => {
+    try {
+      await API.put(`/leaves/${leaveId}/status`, { status, rejectionReason });
+      fetchAllLeaves();
+      setRejectingLeaveId(null);
+      setRejectionReasonInput('');
+    } catch (err) {
+      alert('Failed to update leave status: ' + (err.response?.data?.error || err.message));
+    }
+  };
 
   const fetchEmployees = async () => {
     setLoadingEmployees(true);
     try {
       const response = await API.get('/users');
       setEmployees(response.data);
-    } catch (err) {
-      console.error('Failed to fetch employees', err);
-    } finally {
-      setLoadingEmployees(false);
-    }
+    } catch (err) { console.error(err); }
+    finally { setLoadingEmployees(false); }
   };
 
   const handleRowClick = async (empId) => {
     try {
       const response = await API.get(`/users/${empId}`);
       setSelectedEmployee(response.data);
-    } catch (err) {
-      console.error('Failed to fetch employee details', err);
-    }
+      setEditEmployeeForm({
+        phone: response.data.phone || '', department: response.data.department || '',
+        designation: response.data.designation || '', employeeId: response.data.employeeId || '',
+        employmentType: response.data.employmentType || '', reportingManager: response.data.reportingManager || '',
+        qualification: response.data.qualification || '', institution: response.data.institution || '',
+      });
+      setIsEditingEmployee(false);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleUpdateEmployeeByManager = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await API.put(`/users/${selectedEmployee._id}`, editEmployeeForm);
+      setSelectedEmployee(res.data);
+      alert('Employee profile updated successfully!');
+      setIsEditingEmployee(false);
+      fetchEmployees();
+    } catch (err) { alert('Failed to update employee: ' + (err.response?.data?.error || err.message)); }
   };
 
   const handleProfileUpdate = async (e) => {
@@ -93,452 +199,428 @@ export default function App() {
       setUser(response.data);
       localStorage.setItem('user', JSON.stringify(response.data));
       setProfileSuccess('Profile updated successfully!');
+      setTimeout(() => setProfileSuccess(''), 4000);
     } catch (err) {
-      console.error('Failed to update profile', err);
       alert('Error updating profile: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setSavingProfile(false);
-    }
+    } finally { setSavingProfile(false); }
   };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
+    navigate('/');
   };
+
+  const pendingLeaveRequests = allLeaves.filter(l => l.status === 'Pending');
 
   if (!user) {
     return <Login onLoginSuccess={(userData) => {
-      if (!userData._id && userData.id) userData._id = userData.id;
+      let rawId = userData._id || userData.id || '';
+      if (rawId.includes(':')) rawId = rawId.split(':')[0];
+      userData._id = rawId;
       setUser(userData);
-      setFormData({
-        phone: userData.phone || '',
-        dob: userData.dob || '',
-        gender: userData.gender || '',
-        address: userData.address || '',
-        qualification: userData.qualification || '',
-        institution: userData.institution || '',
-        specialization: userData.specialization || '',
-        graduationYear: userData.graduationYear || '',
-        bankName: userData.bankName || '',
-        accountNumber: userData.accountNumber || '',
-        ifsc: userData.ifsc || '',
-        emergencyName: userData.emergencyName || '',
-        emergencyRelationship: userData.emergencyRelationship || '',
-        emergencyPhone: userData.emergencyPhone || '',
-      });
+      localStorage.setItem('user', JSON.stringify(userData));
+      navigate('/dashboard');
     }} />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white relative">
-      {/* Navbar */}
-      <nav className="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center space-x-6">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-indigo-600 rounded-lg">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-lg tracking-wide">HR Portal</span>
-          </div>
-          
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                activeTab === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span>Dashboard</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                activeTab === 'profile' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-              }`}
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>My Profile</span>
-            </button>
+    <div className="min-h-screen bg-[#030508] text-white flex font-sans selection:bg-sky-500 selection:text-white relative overflow-x-hidden">
+      
+      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-sky-600/10 rounded-full blur-[180px] pointer-events-none"></div>
+      <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[180px] pointer-events-none"></div>
 
-            {/* Only visible to HR or Managers */}
-            {(user.role === 'hr' || user.role === 'manager') && (
-              <button
-                onClick={() => setActiveTab('employees')}
-                className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                  activeTab === 'employees' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Employees</span>
-              </button>
-            )}
-          </div>
-        </div>
+      <Sidebar user={user} onLogout={handleLogout} />
 
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 text-sm">
-            <UserIcon className="w-4 h-4 text-indigo-400" />
-            <span>{user.name}</span>
-            <span className="text-xs uppercase bg-indigo-600/30 text-indigo-400 px-2 py-0.5 rounded font-semibold">
-              {user.role}
-            </span>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg transition text-sm border border-red-500/30"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Logout</span>
-          </button>
-        </div>
-      </nav>
+      <div className="flex-1 flex flex-col min-h-screen z-10">
+        <Topbar user={user} pendingLeaveRequests={pendingLeaveRequests} onLogout={handleLogout} />
 
-      {/* Main Content Area */}
-      <main className="p-8 max-w-5xl mx-auto">
-        {activeTab === 'dashboard' ? (
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-xl">
-            <h1 className="text-2xl font-bold mb-2">Welcome, {user.name}! 👋</h1>
-            <p className="text-slate-400 text-sm mb-6">
-              You are logged in as <span className="text-indigo-400 font-semibold uppercase">{user.role}</span> in the <span className="text-white font-medium">{user.department}</span> department.
-            </p>
+        <main className="p-6 sm:p-10 max-w-7xl mx-auto w-full flex-1 space-y-8">
+          <Routes>
+            {['/', '/dashboard'].map((path) => (
+              <Route key={path} path={path} element={
+                user.role === 'manager' ? (
+                  <ManagerDashboard user={user} />
+                ) : (
+                  <div className="space-y-8 animate-[fadeIn_0.5s_cubic-bezier(0.16,1,0.3,1)]">
+                    
+                    <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                      <div className="absolute -right-20 -top-20 w-80 h-80 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">Attendance</h3>
-                <p className="text-xl font-bold text-white">Not Checked In</p>
-              </div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">Leave Balance</h3>
-                <p className="text-xl font-bold text-indigo-400">12 Days Available</p>
-              </div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">Pending Requests</h3>
-                <p className="text-xl font-bold text-amber-400">0 Requests</p>
-              </div>
-            </div>
-          </div>
-        ) : activeTab === 'profile' ? (
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-xl space-y-8 font-mono">
-            
-            {/* Header */}
-            <div className="border-b border-dashed border-slate-600 pb-4 flex justify-between items-center">
-              <div>
-                <h1 className="text-xl font-bold tracking-widest text-white">MY PROFILE</h1>
-              </div>
-              <span className="text-xs text-indigo-400 bg-indigo-600/20 px-3 py-1 rounded border border-indigo-500/30">
-                {user.role.toUpperCase()}
-              </span>
-            </div>
+                      <div className="space-y-3 z-10">
+                        <div className="inline-flex items-center space-x-2 px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-[11px] font-bold tracking-widest uppercase">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          <span>Live Workspace — Active</span>
+                        </div>
+                        <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-white font-serif">
+                          Good morning, {user.name} 👋
+                        </h1>
+                        <p className="text-white/60 text-xs sm:text-sm max-w-xl leading-relaxed font-light">
+                          Monitor your real-time attendance timestamps, check leave quotas, and manage time-off requests seamlessly.
+                        </p>
+                      </div>
 
-            {profileSuccess && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm rounded">
-                {profileSuccess}
-              </div>
-            )}
+                      <div className="z-10 bg-white/[0.04] border border-white/10 p-5 rounded-3xl flex items-center space-x-4 shadow-xl">
+                        <div className={`w-3.5 h-3.5 rounded-full ${attendance.checkInTime ? 'bg-emerald-400 shadow-lg shadow-emerald-400/50 animate-pulse' : 'bg-amber-400'}`}></div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold tracking-[0.2em] text-white/40">Status</p>
+                          <p className="text-xs font-bold text-white uppercase tracking-wider">{attendance.status}</p>
+                        </div>
+                      </div>
+                    </div>
 
-            <form onSubmit={handleProfileUpdate} className="space-y-8">
-              
-              {/* Top Summary Card */}
-              <div className="flex items-center space-x-4 p-4 bg-slate-900 border border-dashed border-slate-700 rounded-lg">
-                <div className="w-16 h-16 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-xl rounded">
-                  {user.name.charAt(0)}
+                    {attendanceMessage && (
+                      <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs rounded-2xl flex items-center space-x-3 font-semibold">
+                        <span>✨</span>
+                        <span>{attendanceMessage}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 hover:border-white/20 p-7 rounded-[2rem] shadow-xl transition group">
+                        <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Today's Date</p>
+                        <p className="text-2xl sm:text-3xl font-light text-white mt-4 tracking-tight font-serif">
+                          {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                        <p className="text-xs text-sky-400 mt-2 font-medium tracking-wider uppercase text-[10px]">{new Date().toLocaleDateString('en-US', { weekday: 'long' })}, Active Shift</p>
+                      </div>
+
+                      <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 hover:border-white/20 p-7 rounded-[2rem] shadow-xl transition group">
+                        <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Check-In Timestamp</p>
+                        <p className="text-2xl sm:text-3xl font-light text-white mt-4 tracking-tight font-mono">
+                          {attendance.checkInTime ? new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                        </p>
+                        <p className="text-xs text-emerald-400 mt-2 font-medium tracking-wider uppercase text-[10px]">{attendance.checkInTime ? 'Recorded successfully' : 'Not marked yet'}</p>
+                      </div>
+
+                      <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 hover:border-white/20 p-7 rounded-[2rem] shadow-xl transition group">
+                        <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Working Hours</p>
+                        <p className="text-2xl sm:text-3xl font-light text-white mt-4 tracking-tight font-mono">
+                          {attendance.workingHours} <span className="text-sm font-normal text-white/50">hrs</span>
+                        </p>
+                        <p className="text-xs text-amber-400 mt-2 font-medium tracking-wider uppercase text-[10px]">Accumulated today</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 p-7 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl">
+                      <div className="flex items-center space-x-5">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-400 to-blue-600 text-white flex items-center justify-center font-bold text-xl shadow-xl">🕒</div>
+                        <div>
+                          <h3 className="text-base font-bold text-white">Attendance Control Panel</h3>
+                          <p className="text-xs text-white/50 mt-1">
+                            {!attendance.checkInTime ? "You haven't marked your attendance for today's shift." : !attendance.checkOutTime ? `Active shift checked in at ${new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "Shift completed for today."}
+                          </p>
+                        </div>
+                      </div>
+                      <div>
+                        {!attendance.checkInTime ? (
+                          <button onClick={handleCheckIn} className="px-8 py-3.5 bg-white text-black hover:bg-sky-400 hover:text-white rounded-2xl text-xs font-bold tracking-widest uppercase transition duration-300 shadow-2xl cursor-pointer">[ Check In Now ]</button>
+                        ) : !attendance.checkOutTime ? (
+                          <button onClick={handleCheckOut} className="px-8 py-3.5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl text-xs font-bold tracking-widest uppercase transition duration-300 shadow-2xl cursor-pointer">[ Check Out ]</button>
+                        ) : (
+                          <span className="px-6 py-3.5 bg-emerald-500/10 text-emerald-400 rounded-2xl text-xs font-bold border border-emerald-500/20 flex items-center space-x-2"><span>✓</span><span>Shift Completed</span></span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Leave Balance Quotas */}
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-bold text-white/50 uppercase tracking-[0.2em]">Leave Balance Allocations</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 p-7 rounded-[2rem] shadow-xl">
+                          <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Casual Leave</p>
+                          <p className="text-3xl font-light text-white font-serif mt-2">{user.leaveBalance?.casualLeave ?? 12} <span className="text-xs text-white/40 font-sans">/ 12 days</span></p>
+                        </div>
+                        <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 p-7 rounded-[2rem] shadow-xl">
+                          <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Sick Leave</p>
+                          <p className="text-3xl font-light text-white font-serif mt-2">{user.leaveBalance?.sickLeave ?? 10} <span className="text-xs text-white/40 font-sans">/ 10 days</span></p>
+                        </div>
+                        <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 p-7 rounded-[2rem] shadow-xl">
+                          <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Earned Leave</p>
+                          <p className="text-3xl font-light text-white font-serif mt-2">{user.leaveBalance?.earnedLeave ?? 15} <span className="text-xs text-white/40 font-sans">/ 15 days</span></p>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                )
+              } />
+            ))}
+
+            <Route path="/profile" element={
+              <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 shadow-2xl space-y-8 font-mono">
+                <div className="border-b border-white/10 pb-4 flex justify-between items-center">
+                  <h1 className="text-lg font-bold tracking-[0.25em] text-white uppercase">MASTER PROFILE</h1>
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold text-white">{user.name}</h2>
-                  <p className="text-slate-400 text-xs">{user.designation || 'Full Stack Developer Intern'}</p>
-                  <p className="text-indigo-400 text-xs mt-1">{user.employeeId || 'EMP0012'}</p>
-                </div>
+                {profileSuccess && <div className="p-4 bg-emerald-500/10 text-emerald-300 text-xs rounded-2xl font-sans font-bold">{profileSuccess}</div>}
+                <form onSubmit={handleProfileUpdate} className="space-y-8 font-sans">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <label className="text-white/40 block mb-1.5 font-bold uppercase tracking-wider text-[10px]">Phone</label>
+                      <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-4 bg-white/[0.05] border border-white/10 rounded-2xl text-white outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-white/40 block mb-1.5 font-bold uppercase tracking-wider text-[10px]">Address</label>
+                      <input type="text" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full p-4 bg-white/[0.05] border border-white/10 rounded-2xl text-white outline-none" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-2"><button type="submit" disabled={savingProfile} className="px-8 py-4 bg-white text-black hover:bg-sky-400 rounded-2xl text-xs font-bold uppercase cursor-pointer">Save Changes</button></div>
+                </form>
               </div>
+            } />
 
-              {/* Personal Information */}
-              <div className="space-y-4 border-b border-dashed border-slate-700 pb-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">Personal Information</h3>
-                  <span className="text-xs text-slate-500">[Editable]</span>
+            {/* Attendance Route (Manager sees employee-only list) */}
+            <Route path="/attendance" element={
+              user.role === 'manager' ? (
+                <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 shadow-2xl space-y-6">
+                  <h1 className="text-2xl sm:text-3xl font-light text-white font-serif">Manage Attendance</h1>
+                  <div className="relative max-w-sm">
+                    <input type="text" value={searchEmpId} onChange={(e) => setSearchEmpId(e.target.value)} placeholder="Search By Employee ID or Name..." className="w-full pl-4 pr-4 py-3.5 bg-white/[0.05] border border-white/10 rounded-2xl text-xs text-white outline-none" />
+                  </div>
+                  <table className="w-full text-left text-sm">
+                    <thead><tr className="border-b border-white/10 text-white/40 text-[10px] uppercase font-bold"><th className="py-4 px-4">Name</th><th className="py-4 px-4">Emp Id</th><th className="py-4 px-4">Department</th><th className="py-4 px-4">Status</th></tr></thead>
+                    <tbody className="divide-y divide-white/5 text-xs">
+                      {employees
+                        .filter(emp => emp.role !== 'manager' && emp.role !== 'hr')
+                        .filter(emp => !searchEmpId || (emp.employeeId && emp.employeeId.toLowerCase().includes(searchEmpId.toLowerCase())) || emp.name.toLowerCase().includes(searchEmpId.toLowerCase()))
+                        .map(emp => (
+                          <tr key={emp._id}>
+                            <td className="py-4 px-4 text-white font-bold">{emp.name}</td>
+                            <td className="py-4 px-4 text-sky-400 font-mono">{emp.employeeId}</td>
+                            <td className="py-4 px-4 text-white/60">{emp.department}</td>
+                            <td className="py-4 px-4"><span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-xl font-bold">Present</span></td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Full Name</label>
-                    <input type="text" disabled value={user.name} className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-400 cursor-not-allowed" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Email</label>
-                    <input type="text" disabled value={user.email} className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-400 cursor-not-allowed" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Phone</label>
-                    <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="+91 XXXXX XXXXX" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white focus:border-indigo-500" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Date of Birth</label>
-                    <input type="date" value={formData.dob} onChange={e => setFormData({...formData, dob: e.target.value})} className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white focus:border-indigo-500" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Gender</label>
-                    <select value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})} className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white focus:border-indigo-500">
-                      <option value="">Select Gender</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-slate-400 block mb-1">Address</label>
-                    <input type="text" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="City, State" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white focus:border-indigo-500" />
-                  </div>
+              ) : (
+                <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 shadow-2xl space-y-6">
+                  <h1 className="text-2xl font-light text-white font-serif">Attendance History</h1>
+                  <table className="w-full text-left text-sm">
+                    <thead><tr className="border-b border-white/10 text-white/40 text-[10px] uppercase font-bold"><th className="py-4 px-4">Date</th><th className="py-4 px-4">Hours</th><th className="py-4 px-4">Status</th></tr></thead>
+                    <tbody className="divide-y divide-white/5 text-xs">
+                      {attendanceHistory.map(log => (
+                        <tr key={log._id}><td className="py-4 px-4 text-white font-bold">{log.date}</td><td className="py-4 px-4 text-sky-400">{log.workingHours} hrs</td><td className="py-4 px-4 text-emerald-400">{log.status}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
+              )
+            } />
 
-              {/* Employment Information (HR Controlled) */}
-              <div className="space-y-4 border-b border-dashed border-slate-700 pb-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400">Employment Information</h3>
-                  <span className="text-xs text-amber-500/80">[Controlled by HR]</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs bg-slate-900/50 p-4 rounded border border-slate-800">
-                  <div>
-                    <span className="text-slate-500 block">Employee ID</span>
-                    <span className="text-white font-bold">{user.employeeId || 'EMP0012'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block">Department</span>
-                    <span className="text-white font-bold">{user.department || 'Engineering'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block">Designation</span>
-                    <span className="text-white font-bold">{user.designation || 'Full Stack Developer Intern'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block">Joining Date</span>
-                    <span className="text-white font-bold">{user.joiningDate || '10 Sept 2026'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block">Employment Type</span>
-                    <span className="text-white font-bold">{user.employmentType || 'Internship'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block">Reporting Manager</span>
-                    <span className="text-white font-bold">{user.reportingManager || 'Aaquib Khan'}</span>
-                  </div>
-                </div>
-              </div>
+            {/* Leave Page Route */}
+            <Route path="/leave" element={<LeavePage user={user} />} />
 
-              {/* Education */}
-              <div className="space-y-4 border-b border-dashed border-slate-700 pb-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">Education</h3>
-                  <span className="text-xs text-slate-500">[Editable]</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Qualification</label>
-                    <input type="text" value={formData.qualification} onChange={e => setFormData({...formData, qualification: e.target.value})} placeholder="e.g. MCA" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
+            {/* Manager Routes */}
+            {user.role === 'manager' && (
+              <>
+                <Route path="/employees" element={
+                  <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 shadow-2xl">
+                    <h1 className="text-2xl sm:text-3xl font-light text-white font-serif mb-6">Team Directory (Employees)</h1>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-sm">
+                        <thead>
+                          <tr className="border-b border-white/10 text-white/40 text-[10px] uppercase font-bold tracking-[0.2em]">
+                            <th className="py-4 px-4">Name</th>
+                            <th className="py-4 px-4">Email</th>
+                            <th className="py-4 px-4">Department</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 text-xs">
+                          {employees
+                            .filter(emp => emp.role !== 'manager' && emp.role !== 'hr')
+                            .map((emp) => (
+                              <tr key={emp._id} onClick={() => handleRowClick(emp._id)} className="hover:bg-white/[0.02] cursor-pointer transition">
+                                <td className="py-4 px-4 font-bold text-white">{emp.name}</td>
+                                <td className="py-4 px-4 text-white/60">{emp.email}</td>
+                                <td className="py-4 px-4 text-sky-400 font-semibold">{emp.department}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Institution</label>
-                    <input type="text" value={formData.institution} onChange={e => setFormData({...formData, institution: e.target.value})} placeholder="College Name" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Specialization</label>
-                    <input type="text" value={formData.specialization} onChange={e => setFormData({...formData, specialization: e.target.value})} placeholder="Computer Applications" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Graduation Year</label>
-                    <input type="text" value={formData.graduationYear} onChange={e => setFormData({...formData, graduationYear: e.target.value})} placeholder="2027" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                </div>
-              </div>
+                } />
 
-              {/* Bank Details */}
-              <div className="space-y-4 border-b border-dashed border-slate-700 pb-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">Bank Details</h3>
-                  <span className="text-xs text-slate-500">[Editable]</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Bank Name</label>
-                    <input type="text" value={formData.bankName} onChange={e => setFormData({...formData, bankName: e.target.value})} placeholder="Example Bank" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Account Number</label>
-                    <input type="text" value={formData.accountNumber} onChange={e => setFormData({...formData, accountNumber: e.target.value})} placeholder="********1234" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">IFSC</label>
-                    <input type="text" value={formData.ifsc} onChange={e => setFormData({...formData, ifsc: e.target.value})} placeholder="XXXXXXXXX" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                </div>
-              </div>
+                <Route path="/manager-leaves" element={
+                  <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 shadow-2xl space-y-6">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h1 className="text-2xl sm:text-3xl font-light text-white font-serif">Leave Approval Queue</h1>
+                        <p className="text-white/50 text-xs sm:text-sm mt-1">Review and manage team leave applications.</p>
+                      </div>
+                      <span className="bg-white/[0.05] border border-white/10 px-4 py-2 rounded-2xl text-xs text-white font-bold">
+                        Total Requests: {allLeaves.length}
+                      </span>
+                    </div>
 
-              {/* Emergency Contact */}
-              <div className="space-y-4 pb-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">Emergency Contact</h3>
-                  <span className="text-xs text-slate-500">[Editable]</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Name</label>
-                    <input type="text" value={formData.emergencyName} onChange={e => setFormData({...formData, emergencyName: e.target.value})} placeholder="Contact Name" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Relationship</label>
-                    <input type="text" value={formData.emergencyRelationship} onChange={e => setFormData({...formData, emergencyRelationship: e.target.value})} placeholder="Parent / Spouse" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Phone</label>
-                    <input type="text" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} placeholder="Phone Number" className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-white" />
-                  </div>
-                </div>
-              </div>
+                    {loadingAllLeaves ? (
+                      <div className="text-center py-12 text-white/40 text-sm">Loading leave requests...</div>
+                    ) : allLeaves.length === 0 ? (
+                      <div className="text-center py-12 text-white/40 text-sm">No leave applications found in the system.</div>
+                    ) : (
+                      <div className="space-y-4">
+                        {allLeaves.map((leave) => (
+                          <div key={leave._id} className="bg-white/[0.02] border border-white/10 p-6 rounded-3xl space-y-4">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                              <div>
+                                <div className="flex items-center space-x-3">
+                                  <span className="font-bold text-white text-base">{leave.employee?.name || 'Unknown Employee'}</span>
+                                  <span className="text-[10px] text-sky-400 bg-sky-500/10 border border-sky-500/20 px-3 py-1 rounded-full font-bold">{leave.employee?.department || 'Staff'}</span>
+                                </div>
+                                <p className="text-xs text-white/60 mt-1 font-mono">
+                                  <strong className="text-white">{leave.leaveType}</strong> · {leave.fromDate} to {leave.toDate}
+                                </p>
+                                <p className="text-xs text-white/80 mt-3 bg-white/[0.03] p-3.5 rounded-2xl border border-white/10">
+                                  <span className="text-white/40 font-bold uppercase tracking-wider text-[10px]">Reason:</span> {leave.reason}
+                                </p>
+                              </div>
 
-              {/* Save Button */}
-              <div className="border-t border-dashed border-slate-600 pt-6 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={savingProfile}
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-bold tracking-wider transition shadow-lg shadow-indigo-600/30 disabled:opacity-50"
-                >
-                  {savingProfile ? 'SAVING...' : '[Save Changes]'}
-                </button>
-              </div>
+                              <div className="flex items-center space-x-3 self-end md:self-center">
+                                {leave.status === 'Pending' ? (
+                                  <div className="flex items-center space-x-2">
+                                    <button
+                                      onClick={() => handleLeaveAction(leave._id, 'Approved')}
+                                      className="px-5 py-3 bg-white text-black hover:bg-sky-400 hover:text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition cursor-pointer shadow-xl"
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() => setRejectingLeaveId(leave._id)}
+                                      className="px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition cursor-pointer shadow-xl"
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                ) : leave.status === 'Approved' ? (
+                                  <span className="px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-2xl text-xs font-bold">
+                                    ✓ Approved
+                                  </span>
+                                ) : (
+                                  <span className="px-4 py-2 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-2xl text-xs font-bold">
+                                    × Rejected
+                                  </span>
+                                )}
+                              </div>
+                            </div>
 
-            </form>
-          </div>
-        ) : activeTab === 'employees' && (user.role === 'hr' || user.role === 'manager') ? (
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-xl">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h1 className="text-2xl font-bold">Employee Directory</h1>
-                <p className="text-slate-400 text-sm mt-1">Click on any employee row to view their complete profile</p>
-              </div>
-              <span className="bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm text-indigo-400 font-medium">
-                Total: {employees.length} Members
-              </span>
-            </div>
+                            {rejectingLeaveId === leave._id && (
+                              <div className="pt-4 border-t border-white/10 flex items-center space-x-3">
+                                <input
+                                  type="text"
+                                  placeholder="Enter reason for rejection..."
+                                  value={rejectionReasonInput}
+                                  onChange={(e) => setRejectionReasonInput(e.target.value)}
+                                  className="flex-1 p-3.5 bg-white/[0.05] border border-white/10 rounded-2xl text-xs text-white outline-none font-medium placeholder-white/30"
+                                />
+                                <button
+                                  onClick={() => handleLeaveAction(leave._id, 'Rejected', rejectionReasonInput)}
+                                  className="px-5 py-3.5 bg-rose-600 text-white rounded-2xl text-xs font-bold hover:bg-rose-500 cursor-pointer shadow-xl"
+                                >
+                                  Confirm Rejection
+                                </button>
+                                <button
+                                  onClick={() => { setRejectingLeaveId(null); setRejectionReasonInput(''); }}
+                                  className="px-5 py-3.5 bg-white/[0.05] text-white/70 hover:text-white rounded-2xl text-xs font-bold cursor-pointer transition"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
 
-            {loadingEmployees ? (
-              <div className="text-center py-12 text-slate-400">Loading employees...</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-700 text-slate-400 text-xs uppercase tracking-wider">
-                      <th className="py-3 px-4">Name</th>
-                      <th className="py-3 px-4">Email</th>
-                      <th className="py-3 px-4">Department</th>
-                      <th className="py-3 px-4">Joined Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/50 text-sm">
-                    {employees.map((emp) => (
-                      <tr
-                        key={emp._id}
-                        onClick={() => handleRowClick(emp._id)}
-                        className="hover:bg-slate-900/60 transition cursor-pointer"
-                      >
-                        <td className="py-4 px-4 font-medium text-white flex items-center space-x-2">
-                          <div className="w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
-                            {emp.name.charAt(0).toUpperCase()}
+                            {leave.status === 'Rejected' && leave.rejectionReason && (
+                              <p className="text-xs text-rose-400 pt-3 border-t border-white/10 font-semibold">
+                                <strong>Rejection Note:</strong> {leave.rejectionReason}
+                              </p>
+                            )}
                           </div>
-                          <span>{emp.name}</span>
-                        </td>
-                        <td className="py-4 px-4 text-slate-300">{emp.email}</td>
-                        <td className="py-4 px-4 text-slate-300">{emp.department}</td>
-                        <td className="py-4 px-4 text-slate-400">
-                          {emp.joiningDate || new Date(emp.createdAt).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                } />
+              </>
             )}
-          </div>
-        ) : null}
-      </main>
 
-      {/* Employee Profile Modal */}
+          </Routes>
+        </main>
+      </div>
+
+      {/* Selected Employee Modal */}
       {selectedEmployee && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-2xl p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto font-mono text-xs">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-[#090d16] border border-white/15 rounded-[2.5rem] w-full max-w-2xl p-8 sm:p-10 shadow-2xl relative max-h-[90vh] overflow-y-auto font-sans text-xs">
             <button
-              onClick={() => setSelectedEmployee(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded bg-slate-900 border border-slate-700 transition"
+              onClick={() => { setSelectedEmployee(null); setIsEditingEmployee(false); }}
+              className="absolute top-6 right-6 text-white/40 hover:text-white p-2.5 rounded-2xl bg-white/[0.05] transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center space-x-4 mb-6 border-b border-dashed border-slate-700 pb-4">
-              <div className="w-12 h-12 rounded bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-lg border border-indigo-500/30">
-                {selectedEmployee.name.charAt(0).toUpperCase()}
+            <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-6">
+              <div className="flex items-center space-x-4">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-400 to-blue-600 text-white flex items-center justify-center font-bold text-lg shadow-xl">
+                  {selectedEmployee.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">{selectedEmployee.name}</h2>
+                  <p className="text-white/50 text-xs">{selectedEmployee.designation || 'Staff'} · {selectedEmployee.department}</p>
+                  <p className="text-sky-400 font-mono text-xs font-bold">{selectedEmployee.employeeId || 'EMP0000'}</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-base font-bold text-white">{selectedEmployee.name}</h2>
-                <p className="text-slate-400 text-xs">{selectedEmployee.designation || 'Full Stack Developer Intern'}</p>
-                <p className="text-indigo-400 text-xs">{selectedEmployee.employeeId || 'EMP0012'}</p>
-              </div>
+
+              {user.role === 'manager' && (
+                <button
+                  onClick={() => setIsEditingEmployee(!isEditingEmployee)}
+                  className="px-5 py-2.5 bg-white text-black hover:bg-sky-400 hover:text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition cursor-pointer shadow-xl"
+                >
+                  {isEditingEmployee ? 'Cancel Edit' : 'Edit Profile [Manager]'}
+                </button>
+              )}
             </div>
 
-            <div className="space-y-4">
-              {/* Personal Info */}
-              <div className="bg-slate-900/60 p-4 rounded border border-slate-700/60 space-y-2">
-                <h3 className="text-indigo-400 font-bold uppercase tracking-wider mb-2">Personal Information</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-slate-500">Phone:</span> <span className="text-white">{selectedEmployee.phone || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">DOB:</span> <span className="text-white">{selectedEmployee.dob || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">Gender:</span> <span className="text-white">{selectedEmployee.gender || 'Not Provided'}</span></div>
-                  <div className="col-span-2"><span className="text-slate-500">Address:</span> <span className="text-white">{selectedEmployee.address || 'Not Provided'}</span></div>
+            {!isEditingEmployee ? (
+              <div className="space-y-4">
+                <div className="bg-white/[0.02] p-5 rounded-2xl border border-white/10 space-y-2">
+                  <h3 className="text-white/70 font-bold uppercase tracking-[0.15em] text-[10px] mb-2">Personal Information</h3>
+                  <div className="grid grid-cols-2 gap-2 text-white/70">
+                    <div><span className="text-white/40 font-bold">Phone:</span> <span className="text-white font-semibold">{selectedEmployee.phone || 'Not Provided'}</span></div>
+                    <div><span className="text-white/40 font-bold">Email:</span> <span className="text-white font-semibold">{selectedEmployee.email}</span></div>
+                    <div><span className="text-white/40 font-bold">DOB:</span> <span className="text-white font-semibold">{selectedEmployee.dob || 'Not Provided'}</span></div>
+                    <div><span className="text-white/40 font-bold">Gender:</span> <span className="text-white font-semibold">{selectedEmployee.gender || 'Not Provided'}</span></div>
+                  </div>
                 </div>
               </div>
-
-              {/* Employment Info */}
-              <div className="bg-slate-900/60 p-4 rounded border border-slate-700/60 space-y-2">
-                <h3 className="text-amber-400 font-bold uppercase tracking-wider mb-2">Employment Information</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-slate-500">Department:</span> <span className="text-white">{selectedEmployee.department || 'Engineering'}</span></div>
-                  <div><span className="text-slate-500">Joining Date:</span> <span className="text-white">{selectedEmployee.joiningDate || new Date(selectedEmployee.createdAt).toLocaleDateString()}</span></div>
-                  <div><span className="text-slate-500">Type:</span> <span className="text-white">{selectedEmployee.employmentType || 'Internship'}</span></div>
-                  <div><span className="text-slate-500">Manager:</span> <span className="text-white">{selectedEmployee.reportingManager || 'Aaquib Khan'}</span></div>
+            ) : (
+              <form onSubmit={handleUpdateEmployeeByManager} className="space-y-4">
+                <div className="bg-white/[0.02] p-5 rounded-2xl border border-white/10 space-y-3">
+                  <h3 className="text-white/70 font-bold uppercase tracking-[0.15em] text-[10px]">Edit Employee Details [Manager Control]</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-white/40 block mb-1 font-bold">Department</label>
+                      <input type="text" value={editEmployeeForm.department} onChange={e => setEditEmployeeForm({...editEmployeeForm, department: e.target.value})} className="w-full p-3 bg-white/[0.05] border border-white/10 rounded-xl text-white outline-none font-semibold" />
+                    </div>
+                    <div>
+                      <label className="text-white/40 block mb-1 font-bold">Designation</label>
+                      <input type="text" value={editEmployeeForm.designation} onChange={e => setEditEmployeeForm({...editEmployeeForm, designation: e.target.value})} className="w-full p-3 bg-white/[0.05] border border-white/10 rounded-xl text-white outline-none font-semibold" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button type="submit" className="px-5 py-2.5 bg-white text-black hover:bg-sky-400 rounded-xl font-bold cursor-pointer shadow-xl transition">Save Changes</button>
+                  </div>
                 </div>
-              </div>
-
-              {/* Education */}
-              <div className="bg-slate-900/60 p-4 rounded border border-slate-700/60 space-y-2">
-                <h3 className="text-indigo-400 font-bold uppercase tracking-wider mb-2">Education</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-slate-500">Qualification:</span> <span className="text-white">{selectedEmployee.qualification || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">Institution:</span> <span className="text-white">{selectedEmployee.institution || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">Specialization:</span> <span className="text-white">{selectedEmployee.specialization || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">Graduation Year:</span> <span className="text-white">{selectedEmployee.graduationYear || 'Not Provided'}</span></div>
-                </div>
-              </div>
-
-              {/* Bank Details */}
-              <div className="bg-slate-900/60 p-4 rounded border border-slate-700/60 space-y-2">
-                <h3 className="text-indigo-400 font-bold uppercase tracking-wider mb-2">Bank Details</h3>
-                <div className="grid grid-cols-3 gap-2">
-                  <div><span className="text-slate-500">Bank:</span> <span className="text-white">{selectedEmployee.bankName || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">A/C:</span> <span className="text-white">{selectedEmployee.accountNumber || 'Not Provided'}</span></div>
-                  <div><span className="text-slate-500">IFSC:</span> <span className="text-white">{selectedEmployee.ifsc || 'Not Provided'}</span></div>
-                </div>
-              </div>
-            </div>
+              </form>
+            )}
 
             <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => setSelectedEmployee(null)}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition"
-              >
-                Close
-              </button>
+              <button onClick={() => { setSelectedEmployee(null); setIsEditingEmployee(false); }} className="px-6 py-3 bg-white/[0.05] hover:bg-white/[0.1] text-white rounded-2xl font-bold transition cursor-pointer">Close</button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }

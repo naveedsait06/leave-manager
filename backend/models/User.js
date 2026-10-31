@@ -36,6 +36,12 @@ const userSchema = new mongoose.Schema({
   joiningDate: { type: String, default: new Date().toLocaleDateString() },
   employmentType: { type: String, default: 'Internship' },
   reportingManager: { type: String, default: 'Aaquib Khan' },
+
+  leaveBalance: {
+    casualLeave: { type: Number, default: 12 },
+    sickLeave: { type: Number, default: 10 },
+    earnedLeave: { type: Number, default: 15 }
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

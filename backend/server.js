@@ -5,6 +5,8 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const attendanceRoutes = require('./routes/attendance');
+const leaveRoutes = require('./routes/leaves');
 
 const app = express();
 app.use(express.json());
@@ -21,6 +23,8 @@ mongoose.connect(MONGO_URI)
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/leaves', leaveRoutes);
 
 // Test Route
 app.get('/', (req, res) => {
