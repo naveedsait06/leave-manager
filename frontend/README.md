@@ -1,16 +1,37 @@
-# React + Vite
+# Rigel Software Solutions — Enterprise HRMS & Leave Management System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A high-end, full-stack Human Resource Management System (HRMS) built with the **MERN Stack** (MongoDB, Express.js, React, Node.js) and styled with a luxurious **Dark Obsidian & Frosted Glass (`backdrop-blur-3xl`) aesthetic**. 
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## ✨ Key Features
 
-## React Compiler
+### 🏢 Dual Role Architecture
+* **Employee Workspace**: Live attendance check-ins/check-outs with automated working hour calculation, multi-category leave tracking (Casual, Sick, Earned leaves), and comprehensive profile management.
+* **Leadership Suite (Manager / HR)**: Department oversight, team directory filtering, daily attendance management, and an interactive leave approval queue.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### ⚡ Technical Highlights
+* **Modular Frontend Architecture**: Clean separation of concerns with dedicated components (`Sidebar`, `Topbar`) and modular pages (`Dashboard`, `Attendance`, `Leave`, `Profile`).
+* **Secure Authentication**: Encrypted password hashing via `bcryptjs` and stateless session verification using JSON Web Tokens (JWT).
+* **Responsive UI/UX**: Designed using Tailwind CSS with custom mesh gradient glows, smooth micro-interactions, and status transition badges.
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🛠️ Tech Stack
+
+* **Frontend**: React, React Router, Tailwind CSS, Lucide Icons
+* **Backend**: Node.js, Express.js
+* **Database**: MongoDB, Mongoose
+
+---
+
+## 🚀 Getting Started Locally
+
+### Prerequisites
+* Node.js installed on your machine
+* MongoDB running locally or via MongoDB Atlas
+
+### 1. Clone the Repository
+```bash
+git clone [https://github.com/naveedsait06/rigel-hrms.git](https://github.com/naveedsait06/rigel-hrms.git)
+cd rigel-hrms
